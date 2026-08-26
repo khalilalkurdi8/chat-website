@@ -2,6 +2,17 @@
 
 import { useState } from "react";
 import type { FormEvent } from "react";
+import Script from "next/script";
+
+declare global {
+  interface Window {
+    Tawk_API?: {
+      hideWidget?: () => void;
+      maximize?: () => void;
+      showWidget?: () => void;
+    };
+  }
+}
 
 type ChatMessage = {
   text: string;
@@ -9,6 +20,9 @@ type ChatMessage = {
 };
 
 export default function Home() {
+  const tawkPropertyId = process.env.NEXT_PUBLIC_TAWK_PROPERTY_ID;
+  const tawkWidgetId = process.env.NEXT_PUBLIC_TAWK_WIDGET_ID;
+  const tawkConfigured = Boolean(tawkPropertyId && tawkWidgetId);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -52,6 +66,12 @@ export default function Home() {
   }
 
   function openChat() {
+    if (tawkConfigured && window.Tawk_API?.maximize) {
+      window.Tawk_API.showWidget?.();
+      window.Tawk_API.maximize();
+      return;
+    }
+
     setIsChatOpen(true);
     setIsSending(true);
     void notifyN8n("chat_opened")
@@ -92,6 +112,51 @@ export default function Home() {
 
   return (
     <main className="shell">
+      {tawkConfigured ? (
+        <>
+          <Script id="tawk-settings" strategy="afterInteractive">
+            {`
+              window.Tawk_API = window.Tawk_API || {};
+              window.Tawk_API.onBeforeLoad = function () {
+                window.Tawk_API.hideWidget && window.Tawk_API.hideWidget();
+              };
+              window.Tawk_API.onChatStarted = function () {
+                fetch("/api/chat", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    event: "tawk_chat_started",
+                    source: "tawk",
+                    page: window.location.href
+                  })
+                }).catch(function () {});
+              };
+              window.Tawk_API.onChatMessageVisitor = function (message) {
+                var text = typeof message === "string"
+                  ? message
+                  : message && (message.text || message.message);
+                if (!text) return;
+                fetch("/api/chat", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    event: "tawk_message",
+                    source: "tawk",
+                    message: text,
+                    page: window.location.href
+                  })
+                }).catch(function () {});
+              };
+            `}
+          </Script>
+          <Script
+            id="tawk-widget"
+            strategy="afterInteractive"
+            src={`https://embed.tawk.to/${tawkPropertyId}/${tawkWidgetId}`}
+          />
+        </>
+      ) : null}
+
       <nav className="nav" aria-label="Main navigation">
         <a className="brand" href="#top" aria-label="Noma home">
           <span className="brand-mark">✦</span>
